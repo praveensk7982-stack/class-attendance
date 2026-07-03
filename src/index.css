@@ -1,0 +1,93 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+@layer base {
+  :root {
+    --background: 222 47% 5%;
+    --foreground: 220 40% 93%;
+    --card: 220 30% 16%;
+    --card-foreground: 220 40% 93%;
+    --popover: 220 30% 16%;
+    --popover-foreground: 220 40% 93%;
+    --primary: 213 93% 64%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 25% 11%;
+    --secondary-foreground: 220 40% 93%;
+    --muted: 220 20% 20%;
+    --muted-foreground: 220 20% 50%;
+    --accent: 160 72% 48%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 68%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 216 30% 24%;
+    --input: 216 30% 24%;
+    --ring: 213 93% 64%;
+    --radius: 0.625rem;
+    --surface: 220 33% 11%;
+    --warn: 0 93% 71%;
+    --present: 160 72% 48%;
+    --absent: 0 93% 71%;
+    --gradient-accent: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+    --gradient-btn: linear-gradient(135deg, hsl(var(--primary)), hsl(217 91% 60%));
+    --gradient-save: linear-gradient(135deg, hsl(var(--accent)), hsl(197 90% 50%));
+    --shadow-card: 0 32px 80px rgba(0,0,0,.4);
+    --shadow-btn: 0 8px 24px rgba(79,156,249,.35);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse 60% 50% at 10% 10%, rgba(79,156,249,.08) 0%, transparent 60%),
+                radial-gradient(ellipse 40% 40% at 90% 80%, rgba(34,211,160,.07) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Syne', sans-serif;
+  }
+  .text-gradient {
+    background: var(--gradient-accent);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .btn-gradient {
+    background: var(--gradient-btn);
+  }
+  .btn-save-gradient {
+    background: var(--gradient-save);
+  }
+  .avatar-gradient {
+    background: var(--gradient-accent);
+  }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.5s cubic-bezier(.16,1,.3,1);
+}
+.animate-slide-up-fast {
+  animation: slideUp 0.3s cubic-bezier(.16,1,.3,1);
+}
