@@ -343,15 +343,24 @@ const StudentLeave = ({ student }: StudentLeaveProps) => {
                   <p className="text-muted-foreground italic">"{req.reason}"</p>
                 </div>
 
-                <span className={`rounded-full px-2.5 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider ${
-                  req.status === 'Approved' 
-                    ? "bg-present/15 text-present border border-present/10" 
-                    : req.status === 'Rejected' 
-                    ? "bg-absent/15 text-absent border border-absent/10" 
-                    : "bg-yellow-400/15 text-yellow-400 border border-yellow-400/10 animate-pulse"
-                }`}>
-                  {req.status}
-                </span>
+                {(() => {
+                  const statusNormalized = (req.status || 'pending').toLowerCase();
+                  let badgeColors = "bg-zinc-500/20 text-zinc-400 border-zinc-500";
+                  
+                  if (statusNormalized === 'approved') {
+                    badgeColors = "bg-green-500/20 text-green-400 border-green-500";
+                  } else if (statusNormalized === 'pending') {
+                    badgeColors = "bg-yellow-500/20 text-yellow-300 border-yellow-500";
+                  } else if (statusNormalized === 'rejected') {
+                    badgeColors = "bg-red-500/20 text-red-400 border-red-500";
+                  }
+
+                  return (
+                    <span className={`rounded-full px-3 py-1 text-[0.65rem] font-bold uppercase tracking-wider border ${badgeColors}`}>
+                      {req.status}
+                    </span>
+                  );
+                })()}
               </div>
             ))}
           </div>

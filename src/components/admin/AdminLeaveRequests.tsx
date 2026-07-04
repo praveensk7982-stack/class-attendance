@@ -231,10 +231,10 @@ const AdminLeaveRequests = () => {
                 {/* Status Badges */}
                 <span className={`rounded-full px-3 py-1 text-[0.68rem] font-bold uppercase tracking-wider ${
                   req.status === 'Approved' 
-                    ? "bg-present/15 text-present border border-present/20" 
+                    ? "bg-green-500/15 text-green-500 border border-green-500/30" 
                     : req.status === 'Rejected' 
-                    ? "bg-absent/15 text-absent border border-absent/20" 
-                    : "bg-yellow-400/15 text-yellow-400 border border-yellow-400/20"
+                    ? "bg-red-500/15 text-red-500 border border-red-500/30" 
+                    : "bg-yellow-500/15 text-yellow-500 border border-yellow-500/30"
                 }`}>
                   {req.status}
                 </span>
@@ -264,14 +264,14 @@ const AdminLeaveRequests = () => {
                 <div className="flex justify-end gap-2.5 border-t border-border/40 pt-4 mt-5">
                   <button
                     onClick={() => handleAction(req.id, 'Rejected')}
-                    className="flex items-center gap-1.5 rounded-lg border border-absent/30 bg-absent/10 hover:bg-absent/20 px-3.5 py-1.5 text-[0.78rem] font-bold text-absent transition-all"
+                    className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 px-3.5 py-1.5 text-[0.78rem] font-bold text-red-500 transition-all"
                   >
                     <X className="h-4 w-4" /> Reject
                   </button>
                   
                   <button
                     onClick={() => handleAction(req.id, 'Approved')}
-                    className="flex items-center gap-1.5 rounded-lg border border-present/30 bg-present/10 hover:bg-present/20 px-3.5 py-1.5 text-[0.78rem] font-bold text-present transition-all"
+                    className="flex items-center gap-1.5 rounded-lg border border-green-500/30 bg-green-500/10 hover:bg-green-500/20 px-3.5 py-1.5 text-[0.78rem] font-bold text-green-500 transition-all"
                   >
                     <Check className="h-4 w-4" /> Approve
                   </button>
@@ -284,7 +284,7 @@ const AdminLeaveRequests = () => {
 
       {/* Toast Notification */}
       {toast && (
-        <div className={`animate-slide-up-fast fixed bottom-8 right-8 z-[999] rounded-lg border bg-card px-5 py-3.5 text-[0.88rem] shadow-[0_16px_40px_rgba(0,0,0,.3)] flex items-center gap-2 ${toast.success ? "border-present text-present" : "border-warn text-warn"}`}>
+        <div className={`animate-slide-up-fast fixed bottom-8 right-8 z-[999] rounded-lg border bg-card px-5 py-3.5 text-[0.88rem] shadow-[0_16px_40px_rgba(0,0,0,.3)] flex items-center gap-2 ${toast.success ? "border-green-500 text-green-500" : "border-warn text-warn"}`}>
           {toast.success ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
           {toast.msg}
         </div>
