@@ -49,21 +49,26 @@ const AdminAttendance = () => {
     try {
       setLoading(true);
       // 1. Fetch Students matching filters
+      // Using ilike instead of eq because the DB stores class as e.g. "3rd Year IT"
+      // while this page's dropdown only sends "3rd Year" - ilike matches both.
       const { data: dbStudents, error: studentError } = await supabase
         .from("students")
         .select("id, name, register_number, class, department")
-        .eq("class", classYear)
+        .ilike("class", `${classYear}%`)
         .eq("department", dept);
 
       let activeStudents: DbStudent[] = [];
-      if (!studentError && dbStudents && dbStudents.length > 0) {
-        activeStudents = dbStudents as DbStudent[];
+      if (!studentError) {
+        // DB query succeeded — trust it completely, even if it's an empty array.
+        // (Previously this also fell back to mock data when the array was empty,
+        // which is why "1st Year" showed fake students that don't exist in the DB.)
+        activeStudents = (dbStudents as DbStudent[]) || [];
       } else {
         // Fallback to local students list
         const stored = localStorage.getItem("local_students");
         if (stored) {
           const allLocal: DbStudent[] = JSON.parse(stored);
-          activeStudents = allLocal.filter(s => s.class === classYear && s.department === dept);
+          activeStudents = allLocal.filter(s => s.class.startsWith(classYear) && s.department === dept);
         } else {
           const list = getStudentsByYear(classYear, dept);
           activeStudents = list.map(s => ({

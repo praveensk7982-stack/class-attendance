@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { MONTH_NAMES } from "@/data/students";
+import { QRCodeSVG } from "qrcode.react";
 import { 
   DollarSign, 
   CreditCard, 
@@ -13,7 +14,9 @@ import {
   Calendar,
   Clock,
   Download,
-  FileText
+  FileText,
+  ArrowLeft,
+  QrCode
 } from "lucide-react";
 
 interface StudentFinesProps {
@@ -30,6 +33,18 @@ interface ReceiptDetails {
   paymentDate: string;
   status: string;
 }
+
+// UPI payee details for each approver
+const UPI_PAYEES: Record<'HOD' | 'Class Advisor', { name: string; vpa: string }> = {
+  HOD: {
+    name: "Praveen S",
+    vpa: "praveen.sk.7982@okhdfcbank"
+  },
+  'Class Advisor': {
+    name: "Kesavan Moorthy K",
+    vpa: "kesavanmoorthyk991-4@oksbi"
+  }
+};
 
 const StudentFines = ({ student }: StudentFinesProps) => {
   const [loading, setLoading] = useState(true);
@@ -53,6 +68,10 @@ const StudentFines = ({ student }: StudentFinesProps) => {
   const [paying, setPaying] = useState(false);
   const [receipt, setReceipt] = useState<ReceiptDetails | null>(null);
 
+  // New: which step of the approval modal we're on, and who was picked
+  const [modalStep, setModalStep] = useState<'select' | 'qr'>('select');
+  const [selectedApprover, setSelectedApprover] = useState<'HOD' | 'Class Advisor' | null>(null);
+
   const [toast, setToast] = useState<{ msg: string; success: boolean } | null>(null);
 
   const triggerToast = (msg: string, success: boolean) => {
@@ -67,85 +86,177 @@ const StudentFines = ({ student }: StudentFinesProps) => {
       const currentYear = new Date().getFullYear();
 
       // 1. Fetch Fine Settings
-      const { data: dbSettings } = await supabase
-        .from("fine_settings")
-        .select("late_fine_rate, leave_fine_rate")
-        .limit(1);
-
       let lRate = 50;
-      let lvRate = 100;
+      let lvRate = 500;
+      try {
+        const { data: dbSettings } = await supabase
+          .from("fine_settings")
+          .select("late_fine_rate, leave_fine_rate")
+          .limit(1);
 
-      if (dbSettings && dbSettings.length > 0) {
-        lRate = Number(dbSettings[0].late_fine_rate);
-        lvRate = Number(dbSettings[0].leave_fine_rate);
-      } else {
+        if (dbSettings && dbSettings.length > 0) {
+          lRate = Number(dbSettings[0].late_fine_rate);
+          lvRate = Number(dbSettings[0].leave_fine_rate);
+        } else {
+          const storedRates = localStorage.getItem("local_fine_rates");
+          if (storedRates) {
+            const rates = JSON.parse(storedRates);
+            lRate = rates.late_fine_rate || 50;
+            lvRate = rates.leave_fine_rate || 500;
+          }
+        }
+      } catch (settingsErr) {
+        console.warn("Could not query fine_settings:", settingsErr);
         const storedRates = localStorage.getItem("local_fine_rates");
         if (storedRates) {
           const rates = JSON.parse(storedRates);
-          lRate = rates.late_fine_rate;
-          lvRate = rates.leave_fine_rate;
+          lRate = rates.late_fine_rate || 50;
+          lvRate = rates.leave_fine_rate || 500;
         }
       }
 
       // 2. Fetch Student Attendance records to calculate days
-      const { data: dbAtt, error } = await supabase
-        .from("attendance")
-        .select("status, is_late")
-        .eq("student_id", student.id);
-
       let records: any[] = [];
-      if (!error && dbAtt) {
-        records = dbAtt;
-      } else {
+      try {
+        const { data: dbAtt, error } = await supabase
+          .from("attendance")
+          .select("status, is_late")
+          .eq("student_id", student.id);
+
+        if (!error && dbAtt) {
+          records = dbAtt;
+        } else {
+          const history = JSON.parse(localStorage.getItem("local_att_history") || "[]");
+          records = history.filter((h: any) => h.student_id === student.id.toString());
+        }
+      } catch (attErr) {
+        console.warn("Could not query attendance:", attErr);
         const history = JSON.parse(localStorage.getItem("local_att_history") || "[]");
         records = history.filter((h: any) => h.student_id === student.id.toString());
       }
 
-      const lateDays = records.filter(r => r.is_late === true).length;
+      // 3. Fetch logs from leave_audit_logs to count manual interval fines
+      let dbLogs: any[] = [];
+      try {
+        const { data } = await supabase
+          .from("leave_audit_logs")
+          .select("details, created_at")
+          .eq("student_id", student.id);
+        if (data) dbLogs = data;
+      } catch (logErr) {
+        console.warn("Could not query leave_audit_logs:", logErr);
+      }
+
+      const currentMonthLogs = dbLogs.filter((log: any) => {
+        const logDate = new Date(log.created_at);
+        return logDate.getMonth() === currentMonth && logDate.getFullYear() === currentYear;
+      });
+
+      // Count manual interval fines
+      const manualLateDays = currentMonthLogs.filter((log: any) => 
+        log.details && log.details.includes("Manual Fine: Interval Fine")
+      ).length;
+
+      const localKeyLate = `local_manual_interval_fines_${student.id}`;
+      const localCountLate = Number(localStorage.getItem(localKeyLate) || "0");
+      
+      const lateDays = manualLateDays + localCountLate;
       const absentDays = records.filter(r => r.status.toLowerCase() === 'absent').length;
 
-      const lateFine = lateDays * lRate;
-      const absentFine = absentDays * lvRate;
+      // Count manual absent fine logs/adjustments
+      let absentFine = absentDays * 500;
+      const studentAbsentLogs = currentMonthLogs.filter((log: any) => 
+        log.details && (
+          log.details.includes("Manual Fine: Absent Fine added by Admin") ||
+          log.details.includes("Manual Adjustment: Absent Fine set to") ||
+          log.details.includes("Manual Adjustment: Absent Fine removed")
+        )
+      );
+
+      // Sort chronologically to apply adjustments correctly
+      studentAbsentLogs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      for (const log of studentAbsentLogs) {
+        if (log.details.includes("Manual Fine: Absent Fine added by Admin")) {
+          absentFine += 500;
+        } else if (log.details.includes("Manual Adjustment: Absent Fine set to")) {
+          const match = log.details.match(/set to (\d+)/);
+          if (match) {
+            absentFine = parseInt(match[1], 10);
+          }
+        } else if (log.details.includes("Manual Adjustment: Absent Fine removed")) {
+          absentFine = 0;
+        }
+      }
+
+      // Apply LocalStorage override fallback
+      const localAdjKey = `local_manual_absent_fine_adj_${student.id}`;
+      const localAdj = localStorage.getItem(localAdjKey);
+      if (localAdj !== null) {
+        absentFine = parseInt(localAdj, 10);
+      }
+
+      const lateFine = lateDays * 50; // Interval Fine is ₹50
       const totalFine = lateFine + absentFine;
 
-      // 3. Fetch Payment Status
-      const { data: dbFines } = await supabase
-        .from("student_fines")
-        .select("payment_status")
-        .eq("student_id", student.id)
-        .eq("month", currentMonth)
-        .eq("year", currentYear)
-        .maybeSingle();
+      let isLeavePaid = currentMonthLogs.some((log: any) => 
+        log.details && log.details.includes("Leave Fine") && log.details.includes("Status: Paid")
+      );
+      let isIntervalPaid = currentMonthLogs.some((log: any) => 
+        log.details && log.details.includes("Interval Fine") && log.details.includes("Status: Paid")
+      );
 
+      // 4. Fetch overall payment status
       let paymentStatus = 'Unpaid';
-      if (dbFines) {
-        paymentStatus = dbFines.payment_status;
-      } else {
+      try {
+        const { data: dbFines } = await supabase
+          .from("student_fines")
+          .select("payment_status")
+          .eq("student_id", student.id)
+          .eq("month", currentMonth)
+          .eq("year", currentYear)
+          .maybeSingle();
+
+        if (dbFines) {
+          paymentStatus = dbFines.payment_status;
+        } else {
+          const localKey = `local_fines_${currentMonth}_${currentYear}`;
+          const list = JSON.parse(localStorage.getItem(localKey) || "[]");
+          const match = list.find((f: any) => f.student_id === student.id.toString());
+          if (match) paymentStatus = match.payment_status;
+        }
+      } catch (finesErr) {
+        console.warn("Could not query student_fines:", finesErr);
         const localKey = `local_fines_${currentMonth}_${currentYear}`;
         const list = JSON.parse(localStorage.getItem(localKey) || "[]");
         const match = list.find((f: any) => f.student_id === student.id.toString());
         if (match) paymentStatus = match.payment_status;
       }
 
+      if (paymentStatus === 'Paid') {
+        isLeavePaid = true;
+        isIntervalPaid = true;
+      } else {
+        const lpLocal = localStorage.getItem(`partial_leave_paid_${student.id}_${currentMonth}_${currentYear}`) === 'true';
+        const ipLocal = localStorage.getItem(`partial_interval_paid_${student.id}_${currentMonth}_${currentYear}`) === 'true';
+        isLeavePaid = isLeavePaid || lpLocal;
+        isIntervalPaid = isIntervalPaid || ipLocal;
+      }
+
+      const pendingAbsentFine = isLeavePaid ? 0 : absentFine;
+      const pendingLateFine = isIntervalPaid ? 0 : lateFine;
+      const pendingTotalFine = pendingAbsentFine + pendingLateFine;
+
       setFines({
         lateDays,
-        lateFine,
+        lateFine: pendingLateFine,
         absentDays,
-        absentFine,
-        totalFine,
-        paymentStatus
+        absentFine: pendingAbsentFine,
+        totalFine: pendingTotalFine,
+        paymentStatus: (isLeavePaid && isIntervalPaid) || paymentStatus === 'Paid' ? 'Paid' : 'Unpaid'
       });
 
-      // Synchronize tab specific payment markers
-      if (paymentStatus === 'Paid') {
-        setLeavePaid(true);
-        setIntervalPaid(true);
-      } else {
-        const lp = localStorage.getItem(`partial_leave_paid_${student.id}_${currentMonth}_${currentYear}`) === 'true';
-        const ip = localStorage.getItem(`partial_interval_paid_${student.id}_${currentMonth}_${currentYear}`) === 'true';
-        setLeavePaid(lp);
-        setIntervalPaid(ip);
-      }
+      setLeavePaid(isLeavePaid);
+      setIntervalPaid(isIntervalPaid);
 
     } catch (err) {
       console.error(err);
@@ -158,15 +269,36 @@ const StudentFines = ({ student }: StudentFinesProps) => {
     loadFinesDetails();
   }, [student.id]);
 
-  const handlePayment = async (approver: 'Class Advisor' | 'HOD') => {
+  // Step 1: student picks who they're paying -> move to QR step
+  const handleSelectApprover = (approver: 'HOD' | 'Class Advisor') => {
+    setSelectedApprover(approver);
+    setModalStep('qr');
+  };
+
+  const handleBackToSelect = () => {
+    setModalStep('select');
+    setSelectedApprover(null);
+  };
+
+  const closeApprovalModal = () => {
+    if (paying) return;
+    setShowApprovalModal(false);
+    setModalStep('select');
+    setSelectedApprover(null);
+  };
+
+  // Step 2: after student confirms they've completed the UPI payment
+  const handleConfirmPayment = async () => {
+    if (!selectedApprover) return;
+    const approver = selectedApprover;
     setPaying(true);
 
     try {
       const currentMonth = new Date().getMonth();
       const currentYear = new Date().getFullYear();
 
-      // Simulate payment network delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Simulate a short verification delay
+      await new Promise(resolve => setTimeout(resolve, 1200));
 
       const isPayingLeave = activeTab === 'leave';
       let nextLeavePaid = leavePaid;
@@ -246,7 +378,7 @@ const StudentFines = ({ student }: StudentFinesProps) => {
           student_id: student.id,
           action: 'Approved',
           performed_by: 'Admin',
-          details: `Fine payment of ₹${rec.amount} approved by ${approver}. Receipt ID: ${recId}`
+          details: `Fine Payment: ${isPayingLeave ? "Leave Fine" : "Interval Fine"} of ₹${rec.amount} paid via UPI to ${approver}. Status: Paid. Receipt ID: ${recId}`
         });
       } catch (logErr) {
         console.error(logErr);
@@ -254,6 +386,8 @@ const StudentFines = ({ student }: StudentFinesProps) => {
 
       // Set state and show receipt
       setShowApprovalModal(false);
+      setModalStep('select');
+      setSelectedApprover(null);
       setShowReceiptModal(true);
 
       // Update UI fine amounts
@@ -307,6 +441,15 @@ Approved By:    ${rec.approvedBy}
 
   const getActiveTabFineAmount = () => {
     return activeTab === 'leave' ? fines.absentFine : fines.lateFine;
+  };
+
+  // Build the UPI deep link for whichever approver is selected
+  const buildUpiLink = () => {
+    if (!selectedApprover) return "";
+    const payee = UPI_PAYEES[selectedApprover];
+    const amount = getActiveTabFineAmount();
+    const note = `${activeTab === 'leave' ? 'Leave' : 'Interval'} Fine - ${student.register_number}`;
+    return `upi://pay?pa=${encodeURIComponent(payee.vpa)}&pn=${encodeURIComponent(payee.name)}&am=${amount}&cu=INR&tn=${encodeURIComponent(note)}`;
   };
 
   return (
@@ -411,12 +554,19 @@ Approved By:    ${rec.approvedBy}
                   </div>
                 </div>
 
-                {fines.absentFine > 0 && !leavePaid && (
+                {fines.absentFine > 0 && !leavePaid ? (
                   <button
                     onClick={() => setShowApprovalModal(true)}
                     className="btn-gradient mt-6 w-full flex items-center justify-center gap-2 rounded-xl py-3 font-display text-[0.88rem] font-bold text-primary-foreground transition-all hover:opacity-90 shadow-md animate-pulse"
                   >
                     <CreditCard className="h-4.5 w-4.5" /> Pay Fine
+                  </button>
+                ) : (
+                  <button
+                    disabled
+                    className="mt-6 w-full flex items-center justify-center gap-2 rounded-xl py-3 font-display text-[0.88rem] font-bold bg-[#1e2530] text-muted-foreground border border-border/40 cursor-not-allowed opacity-40"
+                  >
+                    No Fine to Pay
                   </button>
                 )}
               </div>
@@ -483,12 +633,19 @@ Approved By:    ${rec.approvedBy}
                   </div>
                 </div>
 
-                {fines.lateFine > 0 && !intervalPaid && (
+                {fines.lateFine > 0 && !intervalPaid ? (
                   <button
                     onClick={() => setShowApprovalModal(true)}
                     className="btn-gradient mt-6 w-full flex items-center justify-center gap-2 rounded-xl py-3 font-display text-[0.88rem] font-bold text-primary-foreground transition-all hover:opacity-90 shadow-md animate-pulse"
                   >
                     <CreditCard className="h-4.5 w-4.5" /> Pay Fine
+                  </button>
+                ) : (
+                  <button
+                    disabled
+                    className="mt-6 w-full flex items-center justify-center gap-2 rounded-xl py-3 font-display text-[0.88rem] font-bold bg-[#1e2530] text-muted-foreground border border-border/40 cursor-not-allowed opacity-40"
+                  >
+                    No Fine to Pay
                   </button>
                 )}
               </div>
@@ -498,53 +655,117 @@ Approved By:    ${rec.approvedBy}
         </div>
       )}
 
-      {/* Modern Approval Selection Modal */}
+      {/* Modern Approval / UPI QR Modal */}
       {showApprovalModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md animate-fade-in" onClick={e => e.target === e.currentTarget && !paying && setShowApprovalModal(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md animate-fade-in" onClick={e => e.target === e.currentTarget && closeApprovalModal()}>
           <div className="w-full max-w-[420px] rounded-[24px] border border-border bg-card shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden animate-slide-up-fast p-6 space-y-6">
             
-            <div className="text-center space-y-2">
-              <div className="h-12 w-12 bg-primary/10 border border-primary/20 rounded-full flex items-center justify-center text-primary mx-auto">
-                <HelpCircle className="h-6 w-6" />
-              </div>
-              <h3 className="font-display text-lg font-bold text-foreground">Payment Authorization</h3>
-              <p className="text-[0.78rem] text-muted-foreground px-4">
-                Who approved this fine payment? Please select the corresponding authority.
-              </p>
-            </div>
+            {/* STEP 1: Pick who you're paying */}
+            {modalStep === 'select' && (
+              <>
+                <div className="text-center space-y-2">
+                  <div className="h-12 w-12 bg-primary/10 border border-primary/20 rounded-full flex items-center justify-center text-primary mx-auto">
+                    <HelpCircle className="h-6 w-6" />
+                  </div>
+                  <h3 className="font-display text-lg font-bold text-foreground">Pay Fine Via UPI</h3>
+                  <p className="text-[0.78rem] text-muted-foreground px-4">
+                    Who would you like to pay this fine to? A UPI QR code will be shown next.
+                  </p>
+                </div>
 
-            {paying ? (
-              <div className="py-8 flex flex-col items-center justify-center space-y-3 text-muted-foreground text-[0.82rem]">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <span>Processing transaction...</span>
-              </div>
-            ) : (
-              <div className="space-y-3">
+                <div className="space-y-3">
+                  <button
+                    onClick={() => handleSelectApprover('Class Advisor')}
+                    className="w-full flex items-center justify-between border border-border/60 hover:border-primary/80 bg-surface/50 hover:bg-primary/5 rounded-xl px-4 py-3.5 text-[0.85rem] font-bold text-foreground transition-all group"
+                  >
+                    <span>Class Advisor</span>
+                    <span className="text-[0.7rem] text-muted-foreground group-hover:text-primary transition-colors font-semibold">Select ➔</span>
+                  </button>
+                  
+                  <button
+                    onClick={() => handleSelectApprover('HOD')}
+                    className="w-full flex items-center justify-between border border-border/60 hover:border-primary/80 bg-surface/50 hover:bg-primary/5 rounded-xl px-4 py-3.5 text-[0.85rem] font-bold text-foreground transition-all group"
+                  >
+                    <span>HOD (Head of Department)</span>
+                    <span className="text-[0.7rem] text-muted-foreground group-hover:text-primary transition-colors font-semibold">Select ➔</span>
+                  </button>
+                </div>
+
                 <button
-                  onClick={() => handlePayment('Class Advisor')}
-                  className="w-full flex items-center justify-between border border-border/60 hover:border-primary/80 bg-surface/50 hover:bg-primary/5 rounded-xl px-4 py-3.5 text-[0.85rem] font-bold text-foreground transition-all group"
+                  onClick={closeApprovalModal}
+                  className="w-full border border-border bg-transparent hover:bg-surface text-muted-foreground text-[0.82rem] font-semibold py-2.5 rounded-xl transition-colors"
                 >
-                  <span>Class Advisor</span>
-                  <span className="text-[0.7rem] text-muted-foreground group-hover:text-primary transition-colors font-semibold">Select ➔</span>
+                  Cancel
                 </button>
-                
-                <button
-                  onClick={() => handlePayment('HOD')}
-                  className="w-full flex items-center justify-between border border-border/60 hover:border-primary/80 bg-surface/50 hover:bg-primary/5 rounded-xl px-4 py-3.5 text-[0.85rem] font-bold text-foreground transition-all group"
-                >
-                  <span>HOD (Head of Department)</span>
-                  <span className="text-[0.7rem] text-muted-foreground group-hover:text-primary transition-colors font-semibold">Select ➔</span>
-                </button>
-              </div>
+              </>
             )}
 
-            {!paying && (
-              <button
-                onClick={() => setShowApprovalModal(false)}
-                className="w-full border border-border bg-transparent hover:bg-surface text-muted-foreground text-[0.82rem] font-semibold py-2.5 rounded-xl transition-colors"
-              >
-                Cancel
-              </button>
+            {/* STEP 2: Show UPI QR code to scan */}
+            {modalStep === 'qr' && selectedApprover && (
+              <>
+                <div className="text-center space-y-2">
+                  <div className="h-12 w-12 bg-primary/10 border border-primary/20 rounded-full flex items-center justify-center text-primary mx-auto">
+                    <QrCode className="h-6 w-6" />
+                  </div>
+                  <h3 className="font-display text-lg font-bold text-foreground">Scan to Pay {selectedApprover}</h3>
+                  <p className="text-[0.78rem] text-muted-foreground px-4">
+                    Open Google Pay, PhonePe or any UPI app and scan this code
+                  </p>
+                </div>
+
+                {!paying ? (
+                  <>
+                    {/* QR code with transparent background */}
+                    <div className="flex justify-center py-2">
+                      <div className="rounded-2xl border border-border/60 bg-surface/30 p-5">
+                        <QRCodeSVG
+                          value={buildUpiLink()}
+                          size={200}
+                          bgColor="transparent"
+                          fgColor="#ffffff"
+                          level="M"
+                          includeMargin={false}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-border/50 bg-surface/40 p-4 space-y-2 text-[0.82rem]">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Paying To:</span>
+                        <span className="font-bold text-foreground">{UPI_PAYEES[selectedApprover].name}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">UPI ID:</span>
+                        <span className="font-mono font-bold text-foreground text-[0.75rem]">{UPI_PAYEES[selectedApprover].vpa}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Amount:</span>
+                        <span className="font-bold text-warn text-[1rem]">₹{getActiveTabFineAmount()}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <button
+                        onClick={handleConfirmPayment}
+                        className="btn-gradient w-full flex items-center justify-center gap-2 rounded-xl py-3 font-display text-[0.85rem] font-bold text-primary-foreground transition-all hover:opacity-90 shadow-md"
+                      >
+                        <CheckCircle className="h-4.5 w-4.5" /> I've Completed the Payment
+                      </button>
+                      <button
+                        onClick={handleBackToSelect}
+                        className="w-full flex items-center justify-center gap-1.5 border border-border bg-transparent hover:bg-surface text-muted-foreground text-[0.8rem] font-semibold py-2.5 rounded-xl transition-colors"
+                      >
+                        <ArrowLeft className="h-3.5 w-3.5" /> Back
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="py-8 flex flex-col items-center justify-center space-y-3 text-muted-foreground text-[0.82rem]">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <span>Confirming your payment...</span>
+                  </div>
+                )}
+              </>
             )}
 
           </div>

@@ -12,8 +12,8 @@ export interface Student {
   photo_url?: string;
 }
 
-const thirdYearIT: { reg: string; name: string }[] = [
-  { reg: "961223205001", name: "ABINAYA A" },
+const fourthYearIT: { reg: string; name: string }[] = [
+  { reg: "961223205001", name: "ARINAYA A" },
   { reg: "961223205002", name: "AGNEL IGNATIUS R" },
   { reg: "961223205003", name: "AKSHAYA R" },
   { reg: "961223205004", name: "AMAL SUNO E" },
@@ -71,7 +71,7 @@ const thirdYearIT: { reg: string; name: string }[] = [
   { reg: "961223205304", name: "VINOTH KUMAR P" },
 ];
 
-const secondYearIT: { reg: string; name: string }[] = [
+const thirdYearIT: { reg: string; name: string }[] = [
   { reg: "961224205001", name: "ABISHEK C" },
   { reg: "961224205002", name: "AKSHAYA K R" },
   { reg: "961224205003", name: "AMARNATH A" },

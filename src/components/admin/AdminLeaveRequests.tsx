@@ -57,10 +57,12 @@ const AdminLeaveRequests = () => {
           status: item.status as any,
           created_at: item.created_at
         }));
-        // Sort requests: Pending first, then by date descending
+        // Sort requests: Pending first, then by date descending (case-insensitive)
         mappedList.sort((a, b) => {
-          if (a.status === 'Pending' && b.status !== 'Pending') return -1;
-          if (a.status !== 'Pending' && b.status === 'Pending') return 1;
+          const aPending = a.status?.toLowerCase() === 'pending';
+          const bPending = b.status?.toLowerCase() === 'pending';
+          if (aPending && !bPending) return -1;
+          if (!aPending && bPending) return 1;
           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
         });
         setRequests(mappedList);
@@ -214,7 +216,7 @@ const AdminLeaveRequests = () => {
             <div 
               key={req.id} 
               className={`rounded-2xl border bg-card p-6 shadow-md transition-all ${
-                req.status === 'Pending' 
+                req.status?.toLowerCase() === 'pending' 
                   ? "border-primary/20 bg-gradient-to-r from-card to-primary/5" 
                   : "border-border"
               }`}
@@ -228,11 +230,11 @@ const AdminLeaveRequests = () => {
                   <span className="text-[0.7rem] text-muted-foreground">Reg No: {req.register_number}</span>
                 </div>
                 
-                {/* Status Badges */}
+                {/* Status Badges - case-insensitive so "approved"/"Approved"/"APPROVED" all render green */}
                 <span className={`rounded-full px-3 py-1 text-[0.68rem] font-bold uppercase tracking-wider ${
-                  req.status === 'Approved' 
+                  req.status?.toLowerCase() === 'approved' 
                     ? "bg-green-500/15 text-green-500 border border-green-500/30" 
-                    : req.status === 'Rejected' 
+                    : req.status?.toLowerCase() === 'rejected' 
                     ? "bg-red-500/15 text-red-500 border border-red-500/30" 
                     : "bg-yellow-500/15 text-yellow-500 border border-yellow-500/30"
                 }`}>
@@ -260,7 +262,7 @@ const AdminLeaveRequests = () => {
               </div>
 
               {/* Action Buttons for Pending leaves */}
-              {req.status === 'Pending' && (
+              {req.status?.toLowerCase() === 'pending' && (
                 <div className="flex justify-end gap-2.5 border-t border-border/40 pt-4 mt-5">
                   <button
                     onClick={() => handleAction(req.id, 'Rejected')}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { getStudentsByYear } from "@/data/students";
+import * as XLSX from "xlsx";
 import { 
   Plus, 
   Search, 
@@ -10,8 +11,7 @@ import {
   Check, 
   X,
   Mail,
-  Phone,
-  UserCheck
+  Phone
 } from "lucide-react";
 
 interface DbStudent {
@@ -67,7 +67,16 @@ const AdminStudents = () => {
         .select("*");
 
       if (!error && dbData && dbData.length > 0) {
-        setStudents(dbData as DbStudent[]);
+        // Enrich dbData with display fallback properties (email, phone, etc.)
+        const enriched = dbData.map(s => ({
+          ...s,
+          designation: s.designation || "Student",
+          email: s.email || `${s.register_number}@lites.edu`,
+          phone: s.phone || "9876543210",
+          joining_date: s.joining_date || new Date(s.created_at || Date.now()).toISOString().split("T")[0],
+          photo_url: s.photo_url || `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(s.name)}`
+        }));
+        setStudents(enriched as DbStudent[]);
       } else {
         // Fallback to local storage or seeding
         const stored = localStorage.getItem("local_students");
@@ -122,6 +131,76 @@ const AdminStudents = () => {
     setFormError("");
   };
 
+
+
+  const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[];
+
+        const parsed: any[] = [];
+        for (let i = 4; i < rawData.length; i++) {
+          const row = rawData[i];
+          if (!row || row.length < 3) continue;
+          const regNo = String(row[1] || "").trim();
+          const name = String(row[2] || "").trim();
+          if (!regNo || regNo === "undefined" || regNo.length < 5) continue;
+
+          parsed.push({
+            student_id: regNo,
+            name: name,
+            register_number: regNo,
+            class: "2nd Year",
+            department: "Information Technology"
+          });
+        }
+
+        const currentRegs = new Set(students.map(s => s.register_number));
+        const toInsert = parsed.filter(p => !currentRegs.has(p.register_number));
+
+        if (toInsert.length > 0) {
+          const { data, error } = await supabase
+            .from("students")
+            .insert(toInsert)
+            .select();
+
+          if (!error && data) {
+            triggerToast(`Successfully imported ${data.length} new students! ✓`, true);
+            await fetchStudents();
+          } else {
+            // Local Storage fallback
+            const enrichedToInsert = toInsert.map(t => ({
+              ...t,
+              id: Math.random().toString(),
+              designation: "Student",
+              email: `${t.register_number}@lites.edu`,
+              phone: "9876543210",
+              joining_date: new Date().toISOString().split("T")[0],
+              photo_url: `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(t.name)}`
+            }));
+            const updated = [...enrichedToInsert, ...students];
+            syncStateAndLocal(updated);
+            triggerToast(`Imported ${toInsert.length} students locally! ✓`, true);
+          }
+        } else {
+          triggerToast("All students in the Excel file already exist.", false);
+        }
+      } catch (err) {
+        console.error(err);
+        triggerToast("Failed to parse Excel file.", false);
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim() || !formReg.trim() || !formEmail.trim() || !formPhone.trim()) {
@@ -132,33 +211,44 @@ const AdminStudents = () => {
     setSubmitting(true);
     setFormError("");
 
-    const newStudent = {
+    // Schema-valid columns for database insert
+    const newStudentDb = {
       student_id: formReg.trim(),
       name: formName.trim(),
       register_number: formReg.trim(),
       class: formClass,
-      department: formDept,
-      designation: formDesign,
-      email: formEmail.trim(),
-      phone: formPhone.trim(),
-      joining_date: formJoin,
-      photo_url: `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(formName.trim())}`
+      department: formDept
     };
 
     try {
       // 1. Try Supabase Insert
       const { data, error } = await supabase
         .from("students")
-        .insert([newStudent])
+        .insert([newStudentDb])
         .select();
 
       if (!error && data && data.length > 0) {
-        // Merge into list
-        setStudents(prev => [data[0] as DbStudent, ...prev]);
+        const enriched = {
+          ...data[0],
+          designation: formDesign,
+          email: formEmail.trim(),
+          phone: formPhone.trim(),
+          joining_date: formJoin,
+          photo_url: `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(formName.trim())}`
+        };
+        setStudents(prev => [enriched as DbStudent, ...prev]);
         triggerToast(`Added ${formName} successfully to Database ✓`, true);
       } else {
         // Fallback local storage insert
-        const newLocal = { ...newStudent, id: Math.random().toString() };
+        const newLocal = { 
+          ...newStudentDb, 
+          id: Math.random().toString(),
+          designation: formDesign,
+          email: formEmail.trim(),
+          phone: formPhone.trim(),
+          joining_date: formJoin,
+          photo_url: `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(formName.trim())}`
+        };
         const updatedList = [newLocal, ...students];
         syncStateAndLocal(updatedList);
         triggerToast(`Added ${formName} locally ✓`, true);
@@ -198,32 +288,44 @@ const AdminStudents = () => {
     setSubmitting(true);
     setFormError("");
 
-    const updatedData = {
+    // Schema-valid columns for database update
+    const updatedDataDb = {
       name: formName.trim(),
       register_number: formReg.trim(),
       class: formClass,
-      department: formDept,
-      designation: formDesign,
-      email: formEmail.trim(),
-      phone: formPhone.trim(),
-      joining_date: formJoin,
-      photo_url: selectedStudent.photo_url || `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(formName.trim())}`
+      department: formDept
     };
 
     try {
       // 1. Try Supabase Update
       const { data, error } = await supabase
         .from("students")
-        .update(updatedData)
+        .update(updatedDataDb)
         .eq("register_number", selectedStudent.register_number)
         .select();
 
       if (!error && data && data.length > 0) {
-        setStudents(prev => prev.map(s => s.register_number === selectedStudent.register_number ? (data[0] as DbStudent) : s));
+        const enriched = {
+          ...data[0],
+          designation: formDesign,
+          email: formEmail.trim(),
+          phone: formPhone.trim(),
+          joining_date: formJoin,
+          photo_url: selectedStudent.photo_url || `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(formName.trim())}`
+        };
+        setStudents(prev => prev.map(s => s.register_number === selectedStudent.register_number ? (enriched as DbStudent) : s));
         triggerToast(`Updated profile for ${formName} ✓`, true);
       } else {
         // Fallback local update
-        const updatedList = students.map(s => s.register_number === selectedStudent.register_number ? { ...s, ...updatedData } : s);
+        const updatedList = students.map(s => s.register_number === selectedStudent.register_number ? { 
+          ...s, 
+          ...updatedDataDb,
+          designation: formDesign,
+          email: formEmail.trim(),
+          phone: formPhone.trim(),
+          joining_date: formJoin,
+          photo_url: selectedStudent.photo_url || `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(formName.trim())}`
+        } : s);
         syncStateAndLocal(updatedList);
         triggerToast(`Updated ${formName} locally ✓`, true);
       }
@@ -300,12 +402,24 @@ const AdminStudents = () => {
           </select>
         </div>
 
-        <button
-          onClick={() => { resetForm(); setShowAddModal(true); }}
-          className="btn-gradient flex items-center gap-1.5 rounded-xl px-4 py-2 text-[0.82rem] font-bold text-primary-foreground transition-all hover:opacity-90 shadow-md"
-        >
-          <Plus className="h-4 w-4" /> Add Student
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="border border-border bg-surface hover:bg-surface/80 text-foreground flex items-center gap-1.5 rounded-xl px-4 py-2 text-[0.82rem] font-bold cursor-pointer transition-all shadow-sm">
+            <Plus className="h-4 w-4 text-primary" /> Import Excel
+            <input
+              type="file"
+              accept=".xlsx, .xls"
+              onChange={handleImportExcel}
+              className="hidden"
+            />
+          </label>
+
+          <button
+            onClick={() => { resetForm(); setShowAddModal(true); }}
+            className="btn-gradient flex items-center gap-1.5 rounded-xl px-4 py-2 text-[0.82rem] font-bold text-primary-foreground transition-all hover:opacity-90 shadow-md"
+          >
+            <Plus className="h-4 w-4" /> Add Student
+          </button>
+        </div>
       </div>
 
       {/* Student List Grid / Table */}
