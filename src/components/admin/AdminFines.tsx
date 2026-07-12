@@ -11,7 +11,8 @@ import {
   RefreshCw,
   Sliders,
   Award,
-  Plus
+  Plus,
+  Search
 } from "lucide-react";
 
 interface FineRow {
@@ -36,6 +37,7 @@ const MONTH_NAMES = [
 const AdminFines = () => {
   const [finesList, setFinesList] = useState<FineRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
   
   // Settings rates defaults
   const [lateRate, setLateRate] = useState(50);
@@ -449,6 +451,11 @@ const AdminFines = () => {
     }
   };
 
+  const filteredFinesList = finesList.filter((row) =>
+    row.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    row.register_number.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="p-6 md:p-8 space-y-8 animate-slide-up-fast">
       
@@ -542,22 +549,36 @@ const AdminFines = () => {
             <h3 className="font-display text-[1rem] font-bold">Student Fine Directory</h3>
             <span className="text-[0.72rem] text-muted-foreground">Month: {MONTH_NAMES[new Date().getMonth()]}</span>
           </div>
-          <button 
-            onClick={loadFinesAndSettings}
-            className="p-2 rounded-lg border border-border bg-surface text-muted-foreground hover:text-foreground"
-            title="Refresh Fines"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
+
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search by name or reg no..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9 pr-3 py-2 rounded-lg bg-surface border border-border text-[0.82rem] w-64 outline-none focus:border-primary/60"
+              />
+            </div>
+
+            <button 
+              onClick={loadFinesAndSettings}
+              className="p-2 rounded-lg border border-border bg-surface text-muted-foreground hover:text-foreground"
+              title="Refresh Fines"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {loading ? (
           <div className="flex justify-center items-center py-20 text-muted-foreground">
             <Loader2 className="h-8 w-8 animate-spin text-primary mr-2" /> Recalculating fine balances...
           </div>
-        ) : finesList.length === 0 ? (
+        ) : filteredFinesList.length === 0 ? (
           <div className="p-12 text-center text-muted-foreground">
-            No fines records compiled yet.
+            {searchTerm ? "No students match your search." : "No fines records compiled yet."}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -573,7 +594,7 @@ const AdminFines = () => {
                 </tr>
               </thead>
               <tbody>
-                {finesList.map(row => (
+                {filteredFinesList.map(row => (
                   <tr key={row.register_number} className="border-b border-border/40 hover:bg-surface/30 transition-all">
                     <td className="px-6 py-4">
                       <div className="font-bold text-[0.88rem]">{row.name}</div>
