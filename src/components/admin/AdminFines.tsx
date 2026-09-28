@@ -229,6 +229,20 @@ const AdminFines = () => {
 
   useEffect(() => {
     loadFinesAndSettings();
+
+    const channel = supabase
+      .channel('admin-fines-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_audit_logs' }, () => {
+        loadFinesAndSettings();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'student_fines' }, () => {
+        loadFinesAndSettings();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleUpdateRates = async (e: React.FormEvent) => {

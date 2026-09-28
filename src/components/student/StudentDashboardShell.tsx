@@ -64,14 +64,6 @@ const StudentDashboardShell = () => {
 
   return (
     <div className="relative z-[1] flex min-h-screen bg-background text-foreground">
-      {/* Mobile sidebar overlay */}
-      {!sidebarOpen && (
-        <div 
-          onClick={() => setSidebarOpen(true)}
-          className="fixed inset-0 bg-black/60 z-30 lg:hidden"
-        />
-      )}
-
       {/* Sidebar */}
       <aside className={`fixed top-0 bottom-0 left-0 z-40 w-64 bg-card border-r border-border/60 transition-transform duration-300 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0 lg:static`}>
         <div className="flex flex-col h-full">
