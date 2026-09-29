@@ -97,19 +97,26 @@ const StudentFines = ({ student }: StudentFinesProps) => {
       const currentMonth = new Date().getMonth();
       const currentYear = new Date().getFullYear();
 
-      // 1. Resolve Student DB UUID across database
-      let dbStudentUuid = student.id;
-      try {
-        const { data: dbStudent } = await supabase
-          .from("students")
-          .select("id")
-          .or(`id.eq.${student.id},register_number.eq.${student.register_number || student.reg || ''},student_id.eq.${student.student_id || student.id}`)
-          .maybeSingle();
-        if (dbStudent && dbStudent.id) {
-          dbStudentUuid = dbStudent.id;
+      // 1. Resolve Student DB UUID across database safely
+      const isUuid = (val: any) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+      let dbStudentUuid = isUuid(student.id) ? student.id : null;
+
+      if (!dbStudentUuid) {
+        try {
+          const regNo = student.register_number || student.reg || student.student_id || student.id;
+          if (regNo) {
+            const { data: dbStudent } = await supabase
+              .from("students")
+              .select("id")
+              .eq("register_number", regNo)
+              .maybeSingle();
+            if (dbStudent && dbStudent.id) {
+              dbStudentUuid = dbStudent.id;
+            }
+          }
+        } catch (errDb) {
+          console.warn("Could not query db student:", errDb);
         }
-      } catch (errDb) {
-        console.warn("Could not query db student:", errDb);
       }
 
       const allStudentIds = Array.from(
