@@ -12,7 +12,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { requestId, employeeName, leaveType, fromDate, toDate, reason } = body;
+    const { requestId, employeeName, leaveType, fromDate, toDate, reason, studentClass } = body;
 
     if (!requestId) {
       return new Response(
@@ -23,7 +23,17 @@ serve(async (req) => {
 
     const META_TOKEN = Deno.env.get("META_WHATSAPP_TOKEN");
     const PHONE_NUMBER_ID = Deno.env.get("META_PHONE_NUMBER_ID");
-    const HOD_NUMBER = Deno.env.get("HOD_WHATSAPP_NUMBER");
+    // Route by year: set secrets ADVISOR_WHATSAPP_2 and ADVISOR_WHATSAPP_4.
+    // No secret for a year (e.g. 3rd year) = app-only, no WhatsApp message.
+    const year = String(studentClass ?? "").replace(/\D/g, "").charAt(0);
+    const ADVISOR_NUMBER = year ? Deno.env.get(`ADVISOR_WHATSAPP_${year}`) : undefined;
+
+    if (!ADVISOR_NUMBER) {
+      return new Response(
+        JSON.stringify({ success: true, skipped: true, reason: `No WhatsApp advisor for year "${year}"` }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     const response = await fetch(
       `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
@@ -35,7 +45,7 @@ serve(async (req) => {
         },
         body: JSON.stringify({
           messaging_product: "whatsapp",
-          to: HOD_NUMBER,
+          to: ADVISOR_NUMBER,
           type: "template",
           template: {
             name: "leave_application_alert",

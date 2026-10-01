@@ -40,7 +40,7 @@ interface FineListItem {
   reason: string;
   amount: number;
   date: string;
-  status: 'Paid' | 'Unpaid';
+  status: 'Paid' | 'Unpaid' | 'Pending';
   created_at: string;
 }
 
@@ -215,15 +215,17 @@ const StudentFines = ({ student }: StudentFinesProps) => {
       if (items.length === 0) throw new Error("Nothing to pay");
       const amount = items.reduce((acc, i) => acc + i.amount, 0);
 
-      // Only the rows shown on screen become Paid. Fines added later stay Unpaid.
+      const recId = `REC-${Math.floor(100000 + Math.random() * 900000)}`;
+
+      // Student only SUBMITS the payment: rows become Pending until admin confirms.
+      // Fines added later stay Unpaid.
       const { error } = await supabase
         .from("fine_entries")
-        .update({ status: 'Paid', paid_at: new Date().toISOString() })
+        .update({ status: 'Pending', paid_at: new Date().toISOString(), pay_approver: approver, receipt_id: recId })
         .in("id", items.map(i => i.id))
         .eq("status", "Unpaid");
       if (error) throw error;
 
-      const recId = `REC-${Math.floor(100000 + Math.random() * 900000)}`;
       setReceipt({
         receiptId: recId,
         studentName: student.name,
@@ -232,7 +234,7 @@ const StudentFines = ({ student }: StudentFinesProps) => {
         amount,
         approvedBy: approver,
         paymentDate: new Date().toLocaleString(),
-        status: 'Paid'
+        status: 'Pending confirmation'
       });
 
       try {
@@ -240,7 +242,7 @@ const StudentFines = ({ student }: StudentFinesProps) => {
           student_id: studentUuid,
           action: 'Approved',
           performed_by: 'Admin',
-          details: `Fine Payment: ${targetType} of ₹${amount} paid via UPI to ${approver}. Status: Paid. Receipt ID: ${recId}`
+          details: `Fine Payment: ${targetType} of ₹${amount} submitted via UPI to ${approver}. Status: Pending admin confirmation. Receipt ID: ${recId}`
         });
       } catch (logErr) {
         console.error(logErr);
@@ -251,7 +253,7 @@ const StudentFines = ({ student }: StudentFinesProps) => {
       setSelectedApprover(null);
       setShowReceiptModal(true);
       await loadFinesDetails();
-      triggerToast(`${isPayingLeave ? "Leave" : "Interval"} fine paid successfully! ✓`, true);
+      triggerToast(`${isPayingLeave ? "Leave" : "Interval"} fine submitted. Waiting for admin confirmation ✓`, true);
     } catch (err) {
       console.error(err);
       triggerToast("Payment failed. Please retry.", false);
@@ -276,7 +278,7 @@ Fine Category:  ${rec.fineType}
 Fine Amount:    ₹${rec.amount}.00
 Approved By:    ${rec.approvedBy}
 =========================================
-         THANK YOU FOR PAYING
+         PAYMENT IS FINAL ONLY AFTER ADMIN CONFIRMS
 =========================================`;
 
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -458,13 +460,15 @@ Approved By:    ${rec.approvedBy}
                               <span className={`rounded-full px-2.5 py-0.5 text-[0.68rem] font-bold uppercase tracking-wider ${
                                 item.status === 'Paid'
                                   ? "bg-present/15 text-present border border-present/20"
+                                  : item.status === 'Pending'
+                                  ? "bg-warn/15 text-warn border border-warn/20"
                                   : "bg-absent/15 text-absent border border-absent/20 animate-pulse"
                               }`}>
                                 {item.status}
                               </span>
                             </td>
                             <td className="px-4 py-3 text-right">
-                              {item.status !== 'Paid' ? (
+                              {item.status === 'Unpaid' ? (
                                 <button
                                   onClick={() => setShowApprovalModal(true)}
                                   className="rounded-lg bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 px-3 py-1 text-[0.75rem] font-bold transition-all inline-flex items-center gap-1"
@@ -472,7 +476,9 @@ Approved By:    ${rec.approvedBy}
                                   <CreditCard className="h-3.5 w-3.5" /> Pay Now
                                 </button>
                               ) : (
-                                <span className="text-[0.75rem] text-present font-bold">Cleared</span>
+                                item.status === 'Pending'
+                                  ? <span className="text-[0.75rem] text-warn font-bold">Awaiting admin</span>
+                                  : <span className="text-[0.75rem] text-present font-bold">Cleared</span>
                               )}
                             </td>
                           </tr>
@@ -597,13 +603,15 @@ Approved By:    ${rec.approvedBy}
                               <span className={`rounded-full px-2.5 py-0.5 text-[0.68rem] font-bold uppercase tracking-wider ${
                                 item.status === 'Paid'
                                   ? "bg-present/15 text-present border border-present/20"
+                                  : item.status === 'Pending'
+                                  ? "bg-warn/15 text-warn border border-warn/20"
                                   : "bg-absent/15 text-absent border border-absent/20 animate-pulse"
                               }`}>
                                 {item.status}
                               </span>
                             </td>
                             <td className="px-4 py-3 text-right">
-                              {item.status !== 'Paid' ? (
+                              {item.status === 'Unpaid' ? (
                                 <button
                                   onClick={() => setShowApprovalModal(true)}
                                   className="rounded-lg bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 px-3 py-1 text-[0.75rem] font-bold transition-all inline-flex items-center gap-1"
@@ -611,7 +619,9 @@ Approved By:    ${rec.approvedBy}
                                   <CreditCard className="h-3.5 w-3.5" /> Pay Now
                                 </button>
                               ) : (
-                                <span className="text-[0.75rem] text-present font-bold">Cleared</span>
+                                item.status === 'Pending'
+                                  ? <span className="text-[0.75rem] text-warn font-bold">Awaiting admin</span>
+                                  : <span className="text-[0.75rem] text-present font-bold">Cleared</span>
                               )}
                             </td>
                           </tr>
@@ -755,7 +765,7 @@ Approved By:    ${rec.approvedBy}
                 <CheckCircle className="h-6 w-6" />
               </div>
               <h3 className="font-display text-lg font-bold text-foreground">Payment Receipt</h3>
-              <p className="text-[0.72rem] text-present font-mono font-bold tracking-wider">TRANSACTION SUCCESSFUL</p>
+              <p className="text-[0.72rem] text-present font-mono font-bold tracking-wider">SUBMITTED - AWAITING ADMIN CONFIRMATION</p>
             </div>
 
             {/* Receipt Table Card */}

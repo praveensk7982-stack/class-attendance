@@ -185,6 +185,7 @@ const StudentLeave = ({ student }: StudentLeaveProps) => {
             body: {
               requestId: createdReq.id,
               employeeName: student.name,
+              studentClass: student.class,
               leaveType: leaveType,
               fromDate: fromDate,
               toDate: toDate,

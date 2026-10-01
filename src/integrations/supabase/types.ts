@@ -57,6 +57,8 @@ export type Database = {
           fine_date: string | null
           id: string
           paid_at: string | null
+          pay_approver: string | null
+          receipt_id: string | null
           status: string
           student_id: string
           type: string
@@ -68,6 +70,8 @@ export type Database = {
           fine_date?: string | null
           id?: string
           paid_at?: string | null
+          pay_approver?: string | null
+          receipt_id?: string | null
           status?: string
           student_id: string
           type: string
@@ -79,6 +83,8 @@ export type Database = {
           fine_date?: string | null
           id?: string
           paid_at?: string | null
+          pay_approver?: string | null
+          receipt_id?: string | null
           status?: string
           student_id?: string
           type?: string

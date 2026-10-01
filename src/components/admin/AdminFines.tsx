@@ -25,7 +25,8 @@ interface FineRow {
   late_fine: number;
   absent_fine: number;
   total_fine: number;
-  payment_status: 'Paid' | 'Unpaid';
+  payment_status: 'Paid' | 'Unpaid' | 'Pending';
+  pending_count: number;
   entry_count: number;
 }
 
@@ -117,7 +118,9 @@ const AdminFines = () => {
         const absent = mine.filter((e: any) => e.type === 'Absent');
         const lFine = unpaidSum(late);
         const abFine = unpaidSum(absent);
-        const total = lFine + abFine;
+        const pendingRows = mine.filter((e: any) => e.status === 'Pending');
+        const pendingAmt = pendingRows.reduce((acc: number, e: any) => acc + Number(e.amount), 0);
+        const total = lFine + abFine + pendingAmt;
 
         return {
           student_id: student.id,
@@ -129,7 +132,8 @@ const AdminFines = () => {
           late_fine: lFine,
           absent_fine: abFine,
           total_fine: total,
-          payment_status: (total === 0 && mine.length > 0 ? 'Paid' : 'Unpaid') as 'Paid' | 'Unpaid',
+          payment_status: (pendingRows.length > 0 ? 'Pending' : total === 0 && mine.length > 0 ? 'Paid' : 'Unpaid') as 'Paid' | 'Unpaid' | 'Pending',
+          pending_count: pendingRows.length,
           entry_count: mine.length
         };
       });
@@ -298,6 +302,45 @@ const AdminFines = () => {
     } catch (err) {
       console.error(err);
       triggerToast("Failed to update status.", false);
+      setLoading(false);
+    }
+  };
+
+  // Admin confirms a student's submitted payment (Pending -> Paid)
+  const confirmPayment = async (row: FineRow) => {
+    try {
+      setLoading(true);
+      const { error } = await supabase
+        .from("fine_entries")
+        .update({ status: 'Paid' })
+        .eq("student_id", row.student_id)
+        .eq("status", "Pending");
+      if (error) throw error;
+      triggerToast("Payment confirmed ✓", true);
+      await loadFinesAndSettings();
+    } catch (err) {
+      console.error(err);
+      triggerToast("Failed to confirm payment.", false);
+      setLoading(false);
+    }
+  };
+
+  // Admin rejects a submitted payment (Pending -> Unpaid)
+  const rejectPayment = async (row: FineRow) => {
+    if (!confirm("Reject this payment? The fines go back to Unpaid.")) return;
+    try {
+      setLoading(true);
+      const { error } = await supabase
+        .from("fine_entries")
+        .update({ status: 'Unpaid', paid_at: null, pay_approver: null, receipt_id: null })
+        .eq("student_id", row.student_id)
+        .eq("status", "Pending");
+      if (error) throw error;
+      triggerToast("Payment rejected. Fines are Unpaid again.", true);
+      await loadFinesAndSettings();
+    } catch (err) {
+      console.error(err);
+      triggerToast("Failed to reject payment.", false);
       setLoading(false);
     }
   };
@@ -486,6 +529,8 @@ const AdminFines = () => {
                       <span className={`rounded-full px-2.5 py-0.5 text-[0.68rem] font-bold uppercase tracking-wider ${
                         row.total_fine === 0 
                           ? "bg-present/10 text-present border border-present/10"
+                          : row.payment_status === 'Pending'
+                          ? "bg-warn/15 text-warn border border-warn/20"
                           : row.payment_status === 'Paid'
                           ? "bg-present/15 text-present border border-present/20"
                           : "bg-absent/15 text-absent border border-absent/20 animate-pulse"
@@ -502,6 +547,22 @@ const AdminFines = () => {
                       >
                         <Plus className="h-3.5 w-3.5" /> +₹{lateRate} Late Fine
                       </button>
+                      {row.payment_status === 'Pending' ? (
+                        <>
+                          <button
+                            onClick={() => confirmPayment(row)}
+                            className="rounded-lg border border-present/30 bg-present/10 text-present hover:bg-present/20 px-3 py-1.5 text-[0.75rem] font-bold transition-all"
+                          >
+                            Confirm Payment
+                          </button>
+                          <button
+                            onClick={() => rejectPayment(row)}
+                            className="rounded-lg border border-absent/30 bg-absent/10 text-absent hover:bg-absent/20 px-3 py-1.5 text-[0.75rem] font-bold transition-all"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      ) : (
                       <button
                         onClick={() => togglePayment(row)}
                         disabled={row.entry_count === 0}
@@ -513,6 +574,7 @@ const AdminFines = () => {
                       >
                         {row.payment_status === 'Paid' ? "Mark Unpaid" : "Mark Paid"}
                       </button>
+                      )}
                     </td>
 
                   </tr>
