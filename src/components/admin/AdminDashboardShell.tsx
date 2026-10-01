@@ -64,9 +64,9 @@ const AdminDashboardShell = () => {
   return (
     <div className="relative z-[1] flex min-h-screen bg-background text-foreground">
       {/* Sidebar background overlay on mobile */}
-      {!sidebarOpen && (
+      {sidebarOpen && (
         <div 
-          onClick={() => setSidebarOpen(true)}
+          onClick={() => setSidebarOpen(false)}
           className="fixed inset-0 bg-black/60 z-30 lg:hidden"
         />
       )}

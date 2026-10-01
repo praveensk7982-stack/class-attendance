@@ -19,6 +19,7 @@ export type Database = {
           created_at: string
           date: string
           id: string
+          is_late: boolean | null
           status: string
           student_id: string
         }
@@ -26,6 +27,7 @@ export type Database = {
           created_at?: string
           date: string
           id?: string
+          is_late?: boolean | null
           status: string
           student_id: string
         }
@@ -33,6 +35,7 @@ export type Database = {
           created_at?: string
           date?: string
           id?: string
+          is_late?: boolean | null
           status?: string
           student_id?: string
         }
@@ -46,13 +49,210 @@ export type Database = {
           },
         ]
       }
+      fine_entries: {
+        Row: {
+          amount: number
+          created_at: string
+          created_by: string | null
+          fine_date: string | null
+          id: string
+          paid_at: string | null
+          status: string
+          student_id: string
+          type: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          created_by?: string | null
+          fine_date?: string | null
+          id?: string
+          paid_at?: string | null
+          status?: string
+          student_id: string
+          type: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          created_by?: string | null
+          fine_date?: string | null
+          id?: string
+          paid_at?: string | null
+          status?: string
+          student_id?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fine_entries_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fine_settings: {
+        Row: {
+          created_at: string
+          id: string
+          late_fine_rate: number
+          leave_fine_rate: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          late_fine_rate?: number
+          leave_fine_rate?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          late_fine_rate?: number
+          leave_fine_rate?: number
+        }
+        Relationships: []
+      }
+      leave_audit_logs: {
+        Row: {
+          action: string
+          created_at: string
+          details: string | null
+          id: string
+          performed_by: string
+          request_id: string | null
+          student_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          details?: string | null
+          id?: string
+          performed_by: string
+          request_id?: string | null
+          student_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          details?: string | null
+          id?: string
+          performed_by?: string
+          request_id?: string | null
+          student_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leave_audit_logs_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "leave_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leave_audit_logs_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leave_requests: {
+        Row: {
+          created_at: string
+          from_date: string
+          id: string
+          leave_type: string
+          reason: string
+          status: string
+          student_id: string
+          to_date: string
+        }
+        Insert: {
+          created_at?: string
+          from_date: string
+          id?: string
+          leave_type: string
+          reason: string
+          status?: string
+          student_id: string
+          to_date: string
+        }
+        Update: {
+          created_at?: string
+          from_date?: string
+          id?: string
+          leave_type?: string
+          reason?: string
+          status?: string
+          student_id?: string
+          to_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leave_requests_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      student_fines: {
+        Row: {
+          created_at: string
+          id: string
+          late_fine_paid: boolean | null
+          leave_fine_paid: boolean | null
+          month: number
+          payment_status: string
+          student_id: string
+          year: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          late_fine_paid?: boolean | null
+          leave_fine_paid?: boolean | null
+          month: number
+          payment_status?: string
+          student_id: string
+          year: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          late_fine_paid?: boolean | null
+          leave_fine_paid?: boolean | null
+          month?: number
+          payment_status?: string
+          student_id?: string
+          year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_fines_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       students: {
         Row: {
           class: string
           created_at: string
           department: string
+          designation: string | null
+          email: string | null
           id: string
+          joining_date: string | null
           name: string
+          phone: string | null
+          photo_url: string | null
           register_number: string
           student_id: string
         }
@@ -60,8 +260,13 @@ export type Database = {
           class: string
           created_at?: string
           department: string
+          designation?: string | null
+          email?: string | null
           id?: string
+          joining_date?: string | null
           name: string
+          phone?: string | null
+          photo_url?: string | null
           register_number: string
           student_id: string
         }
@@ -69,8 +274,13 @@ export type Database = {
           class?: string
           created_at?: string
           department?: string
+          designation?: string | null
+          email?: string | null
           id?: string
+          joining_date?: string | null
           name?: string
+          phone?: string | null
+          photo_url?: string | null
           register_number?: string
           student_id?: string
         }

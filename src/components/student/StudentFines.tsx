@@ -69,7 +69,10 @@ const StudentFines = ({ student }: StudentFinesProps) => {
     paymentStatus: 'Unpaid'
   });
 
-  // Track partial payments locally
+  const [studentUuid, setStudentUuid] = useState<string | null>(null);
+  const [fineListItems, setFineListItems] = useState<FineListItem[]>([]);
+
+  // Derived from unpaid rows in fine_entries
   const [leavePaid, setLeavePaid] = useState(false);
   const [intervalPaid, setIntervalPaid] = useState(false);
   
@@ -89,232 +92,73 @@ const StudentFines = ({ student }: StudentFinesProps) => {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const [fineListItems, setFineListItems] = useState<FineListItem[]>([]);
-
   const loadFinesDetails = async () => {
     try {
       setLoading(true);
-      const currentMonth = new Date().getMonth();
-      const currentYear = new Date().getFullYear();
-
-      // 1. Resolve Student DB UUID across database safely
-      const isUuid = (val: any) => typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-      let dbStudentUuid = isUuid(student.id) ? student.id : null;
+      // Resolve the student's database UUID (mock/local students have non-UUID ids)
+      const isUuid = (val: any) =>
+        typeof val === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+      let dbStudentUuid: string | null = isUuid(student.id) ? student.id : null;
 
       if (!dbStudentUuid) {
-        try {
-          const regNo = student.register_number || student.reg || student.student_id || student.id;
-          if (regNo) {
-            const { data: dbStudent } = await supabase
-              .from("students")
-              .select("id")
-              .eq("register_number", regNo)
-              .maybeSingle();
-            if (dbStudent && dbStudent.id) {
-              dbStudentUuid = dbStudent.id;
-            }
-          }
-        } catch (errDb) {
-          console.warn("Could not query db student:", errDb);
+        const regNo = student.register_number || student.reg || student.student_id;
+        if (regNo) {
+          const { data: dbStudent } = await supabase
+            .from("students")
+            .select("id")
+            .eq("register_number", regNo)
+            .maybeSingle();
+          if (dbStudent?.id) dbStudentUuid = dbStudent.id;
         }
       }
+      setStudentUuid(dbStudentUuid);
 
-      const allStudentIds = Array.from(
-        new Set([dbStudentUuid, student.id, student.student_id, student.register_number].filter(Boolean))
-      );
-
-      // 2. Fetch Fine Settings
-      let lRate = 50;
-      let lvRate = 500;
-      try {
-        const { data: dbSettings } = await supabase
-          .from("fine_settings")
-          .select("late_fine_rate, leave_fine_rate")
-          .limit(1);
-
-        if (dbSettings && dbSettings.length > 0) {
-          lRate = Number(dbSettings[0].late_fine_rate);
-          lvRate = Number(dbSettings[0].leave_fine_rate);
-        } else {
-          const storedRates = localStorage.getItem("local_fine_rates");
-          if (storedRates) {
-            const rates = JSON.parse(storedRates);
-            lRate = rates.late_fine_rate || 50;
-            lvRate = rates.leave_fine_rate || 500;
-          }
-        }
-      } catch (settingsErr) {
-        console.warn("Could not query fine_settings:", settingsErr);
+      if (!dbStudentUuid) {
+        setFineListItems([]);
+        setFines({ lateDays: 0, lateFine: 0, absentDays: 0, absentFine: 0, totalFine: 0, paymentStatus: 'Paid' });
+        setLeavePaid(true);
+        setIntervalPaid(true);
+        return;
       }
 
-      // 3. Fetch Student Attendance records
-      let records: any[] = [];
-      try {
-        const { data: dbAtt, error } = await supabase
-          .from("attendance")
-          .select("status, is_late, date, created_at")
-          .in("student_id", allStudentIds);
+      // One row per fine
+      const { data: entries, error: entErr } = await supabase
+        .from("fine_entries")
+        .select("id, type, amount, status, created_at")
+        .eq("student_id", dbStudentUuid)
+        .order("created_at", { ascending: false });
+      if (entErr) throw entErr;
 
-        if (!error && dbAtt) {
-          records = dbAtt;
-        } else {
-          const history = JSON.parse(localStorage.getItem("local_att_history") || "[]");
-          records = history.filter((h: any) => allStudentIds.includes(h.student_id?.toString()));
-        }
-      } catch (attErr) {
-        console.warn("Could not query attendance:", attErr);
-        const history = JSON.parse(localStorage.getItem("local_att_history") || "[]");
-        records = history.filter((h: any) => allStudentIds.includes(h.student_id?.toString()));
-      }
+      const fmt = (d: string) =>
+        new Date(d).toLocaleDateString("en-IN", { day: '2-digit', month: 'short', year: 'numeric' });
 
-      // 4. Fetch logs from leave_audit_logs
-      let dbLogs: any[] = [];
-      try {
-        const { data } = await supabase
-          .from("leave_audit_logs")
-          .select("id, details, created_at, action, performed_by")
-          .in("student_id", allStudentIds);
-        if (data) dbLogs = data;
-      } catch (logErr) {
-        console.warn("Could not query leave_audit_logs:", logErr);
-      }
-
-      // 5. Fetch overall payment status
-      let paymentStatus = 'Unpaid';
-      try {
-        const { data: dbFines } = await supabase
-          .from("student_fines")
-          .select("payment_status")
-          .in("student_id", allStudentIds)
-          .eq("month", currentMonth)
-          .eq("year", currentYear)
-          .maybeSingle();
-
-        if (dbFines) {
-          paymentStatus = dbFines.payment_status;
-        } else {
-          const localKey = `local_fines_${currentMonth}_${currentYear}`;
-          const list = JSON.parse(localStorage.getItem(localKey) || "[]");
-          const match = list.find((f: any) => allStudentIds.includes(f.student_id?.toString()));
-          if (match) paymentStatus = match.payment_status;
-        }
-      } catch (finesErr) {
-        console.warn("Could not query student_fines:", finesErr);
-      }
-
-      const lpLocal = localStorage.getItem(`partial_leave_paid_${dbStudentUuid}_${currentMonth}_${currentYear}`) === 'true';
-      const ipLocal = localStorage.getItem(`partial_interval_paid_${dbStudentUuid}_${currentMonth}_${currentYear}`) === 'true';
-
-      let isLeavePaid = paymentStatus === 'Paid' || lpLocal;
-      let isIntervalPaid = paymentStatus === 'Paid' || ipLocal;
-
-      // 6. Build itemized fine records list created by Admin / system
-      const itemsList: FineListItem[] = [];
-
-      // A) Interval Fines created by Admin
-      const intervalLogs = dbLogs.filter((log: any) => 
-        log.details && log.details.includes("Manual Fine: Interval Fine")
-      );
-      intervalLogs.forEach((log: any, idx: number) => {
-        const dStr = new Date(log.created_at).toLocaleDateString("en-IN", {
-          day: '2-digit', month: 'short', year: 'numeric'
-        });
-        itemsList.push({
-          id: log.id || `log-int-${idx}`,
-          fineType: 'Interval Fine',
-          reason: 'Interval Late Entry Fine (Created by Admin)',
-          amount: lRate,
-          date: dStr,
-          status: isIntervalPaid ? 'Paid' : 'Unpaid',
-          created_at: log.created_at
-        });
-      });
-
-      // Local storage fallback manual interval fines
-      const localKeyLate = `local_manual_interval_fines_${student.id}`;
-      const localCountLate = Number(localStorage.getItem(localKeyLate) || "0");
-      if (localCountLate > intervalLogs.length) {
-        const extraCount = localCountLate - intervalLogs.length;
-        for (let i = 0; i < extraCount; i++) {
-          itemsList.push({
-            id: `local-int-${i}`,
-            fineType: 'Interval Fine',
-            reason: 'Interval Late Entry Fine (Admin Created)',
-            amount: lRate,
-            date: new Date().toLocaleDateString("en-IN", { day: '2-digit', month: 'short', year: 'numeric' }),
-            status: isIntervalPaid ? 'Paid' : 'Unpaid',
-            created_at: new Date().toISOString()
-          });
-        }
-      }
-
-      // B) Absent Fines created by Admin
-      const absentLogs = dbLogs.filter((log: any) => 
-        log.details && (
-          log.details.includes("Manual Fine: Absent Fine added by Admin") ||
-          log.details.includes("Manual Adjustment: Absent Fine set to")
-        )
-      );
-
-      absentLogs.forEach((log: any, idx: number) => {
-        let amt = lvRate;
-        if (log.details.includes("set to")) {
-          const match = log.details.match(/set to (\d+)/);
-          if (match) amt = parseInt(match[1], 10);
-        }
-        const dStr = new Date(log.created_at).toLocaleDateString("en-IN", {
-          day: '2-digit', month: 'short', year: 'numeric'
-        });
-        itemsList.push({
-          id: log.id || `log-abs-${idx}`,
-          fineType: 'Leave Fine',
-          reason: 'Unexcused Absent Fine (Created by Admin)',
-          amount: amt,
-          date: dStr,
-          status: isLeavePaid ? 'Paid' : 'Unpaid',
-          created_at: log.created_at
-        });
-      });
-
-      // C) Attendance Absences
-      const absentAttendance = records.filter((r: any) => r.status && r.status.toLowerCase() === 'absent');
-      absentAttendance.forEach((att: any, idx: number) => {
-        const attDateStr = att.date 
-          ? new Date(att.date).toLocaleDateString("en-IN", { day: '2-digit', month: 'short', year: 'numeric' })
-          : new Date().toLocaleDateString("en-IN", { day: '2-digit', month: 'short', year: 'numeric' });
-        itemsList.push({
-          id: `att-abs-${idx}`,
-          fineType: 'Leave Fine',
-          reason: `Unexcused Absence (${att.date || 'Attendance Record'})`,
-          amount: lvRate,
-          date: attDateStr,
-          status: isLeavePaid ? 'Paid' : 'Unpaid',
-          created_at: att.date || att.created_at || new Date().toISOString()
-        });
-      });
-
+      const itemsList: FineListItem[] = (entries ?? []).map((e: any) => ({
+        id: e.id,
+        fineType: e.type === 'Late' ? 'Interval Fine' : 'Leave Fine',
+        reason: e.type === 'Late' ? 'Interval Late Entry Fine (Created by Admin)' : 'Unexcused Absent Fine',
+        amount: Number(e.amount),
+        date: fmt(e.created_at),
+        status: e.status,
+        created_at: e.created_at
+      }));
       setFineListItems(itemsList);
 
-      // Calculate totals
-      const lateDays = itemsList.filter(i => i.fineType === 'Interval Fine').length;
-      const absentDays = absentAttendance.length;
+      const sumOf = (t: FineListItem['fineType'], st: FineListItem['status']) =>
+        itemsList.filter(i => i.fineType === t && i.status === st).reduce((acc, i) => acc + i.amount, 0);
 
-      const lateFine = isIntervalPaid ? 0 : itemsList.filter(i => i.fineType === 'Interval Fine' && i.status === 'Unpaid').reduce((acc, curr) => acc + curr.amount, 0);
-      const absentFine = isLeavePaid ? 0 : itemsList.filter(i => i.fineType === 'Leave Fine' && i.status === 'Unpaid').reduce((acc, curr) => acc + curr.amount, 0);
-
-      const totalFine = lateFine + absentFine;
+      const lateFine = sumOf('Interval Fine', 'Unpaid');
+      const absentFine = sumOf('Leave Fine', 'Unpaid');
 
       setFines({
-        lateDays,
+        lateDays: itemsList.filter(i => i.fineType === 'Interval Fine').length,
         lateFine,
-        absentDays,
+        absentDays: itemsList.filter(i => i.fineType === 'Leave Fine').length,
         absentFine,
-        totalFine,
-        paymentStatus: (isLeavePaid && isIntervalPaid) || paymentStatus === 'Paid' ? 'Paid' : 'Unpaid'
+        totalFine: lateFine + absentFine,
+        paymentStatus: lateFine + absentFine === 0 ? 'Paid' : 'Unpaid'
       });
-
-      setLeavePaid(isLeavePaid);
-      setIntervalPaid(isIntervalPaid);
+      setLeavePaid(absentFine === 0);
+      setIntervalPaid(lateFine === 0);
 
     } catch (err) {
       console.error(err);
@@ -326,13 +170,9 @@ const StudentFines = ({ student }: StudentFinesProps) => {
   useEffect(() => {
     loadFinesDetails();
 
-    // Enable Supabase Realtime for automatic live updates when Admin creates/updates fines
     const channel = supabase
       .channel(`student-fines-realtime-${student.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_audit_logs' }, () => {
-        loadFinesDetails();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'student_fines' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fine_entries' }, () => {
         loadFinesDetails();
       })
       .subscribe();
@@ -362,117 +202,56 @@ const StudentFines = ({ student }: StudentFinesProps) => {
 
   // Step 2: after student confirms they've completed the UPI payment
   const handleConfirmPayment = async () => {
-    if (!selectedApprover) return;
+    if (!selectedApprover || !studentUuid) return;
     const approver = selectedApprover;
     setPaying(true);
 
     try {
-      const currentMonth = new Date().getMonth();
-      const currentYear = new Date().getFullYear();
-
-      // Simulate a short verification delay
       await new Promise(resolve => setTimeout(resolve, 1200));
 
       const isPayingLeave = activeTab === 'leave';
-      let nextLeavePaid = leavePaid;
-      let nextIntervalPaid = intervalPaid;
+      const targetType = isPayingLeave ? 'Leave Fine' : 'Interval Fine';
+      const items = fineListItems.filter(i => i.fineType === targetType && i.status === 'Unpaid');
+      if (items.length === 0) throw new Error("Nothing to pay");
+      const amount = items.reduce((acc, i) => acc + i.amount, 0);
 
-      if (isPayingLeave) {
-        nextLeavePaid = true;
-        setLeavePaid(true);
-        localStorage.setItem(`partial_leave_paid_${student.id}_${currentMonth}_${currentYear}`, 'true');
-      } else {
-        nextIntervalPaid = true;
-        setIntervalPaid(true);
-        localStorage.setItem(`partial_interval_paid_${student.id}_${currentMonth}_${currentYear}`, 'true');
-      }
+      // Only the rows shown on screen become Paid. Fines added later stay Unpaid.
+      const { error } = await supabase
+        .from("fine_entries")
+        .update({ status: 'Paid', paid_at: new Date().toISOString() })
+        .in("id", items.map(i => i.id))
+        .eq("status", "Unpaid");
+      if (error) throw error;
 
-      // Check if both are paid (or have 0 fine)
-      const leaveFineCleared = nextLeavePaid || fines.absentFine === 0;
-      const intervalFineCleared = nextIntervalPaid || fines.lateFine === 0;
-
-      if (leaveFineCleared && intervalFineCleared) {
-        // Update database fine record to Paid
-        const { data: checkRec } = await supabase
-          .from("student_fines")
-          .select("id")
-          .eq("student_id", student.id)
-          .eq("month", currentMonth)
-          .eq("year", currentYear)
-          .maybeSingle();
-
-        if (checkRec) {
-          await supabase
-            .from("student_fines")
-            .update({ payment_status: 'Paid' })
-            .eq("id", checkRec.id);
-        } else {
-          await supabase
-            .from("student_fines")
-            .insert({
-              student_id: student.id,
-              month: currentMonth,
-              year: currentYear,
-              payment_status: 'Paid'
-            });
-        }
-
-        // Local storage overall update fallback
-        const localKey = `local_fines_${currentMonth}_${currentYear}`;
-        const list = JSON.parse(localStorage.getItem(localKey) || "[]");
-        const idx = list.findIndex((f: any) => f.student_id === student.id.toString());
-        if (idx !== -1) list.splice(idx, 1);
-        
-        list.push({
-          student_id: student.id.toString(),
-          payment_status: 'Paid'
-        });
-        localStorage.setItem(localKey, JSON.stringify(list));
-      }
-
-      // Generate receipt
       const recId = `REC-${Math.floor(100000 + Math.random() * 900000)}`;
-      const rec: ReceiptDetails = {
+      setReceipt({
         receiptId: recId,
         studentName: student.name,
         registerNumber: student.register_number,
-        fineType: isPayingLeave ? "Leave Fine" : "Interval Fine",
-        amount: isPayingLeave ? fines.absentFine : fines.lateFine,
+        fineType: targetType,
+        amount,
         approvedBy: approver,
         paymentDate: new Date().toLocaleString(),
         status: 'Paid'
-      };
+      });
 
-      setReceipt(rec);
-
-      // Log action in audit logs
       try {
         await supabase.from("leave_audit_logs").insert({
-          student_id: student.id,
+          student_id: studentUuid,
           action: 'Approved',
           performed_by: 'Admin',
-          details: `Fine Payment: ${isPayingLeave ? "Leave Fine" : "Interval Fine"} of ₹${rec.amount} paid via UPI to ${approver}. Status: Paid. Receipt ID: ${recId}`
+          details: `Fine Payment: ${targetType} of ₹${amount} paid via UPI to ${approver}. Status: Paid. Receipt ID: ${recId}`
         });
       } catch (logErr) {
         console.error(logErr);
       }
 
-      // Set state and show receipt
       setShowApprovalModal(false);
       setModalStep('select');
       setSelectedApprover(null);
       setShowReceiptModal(true);
-
-      // Update UI fine amounts
-      setFines(prev => ({
-        ...prev,
-        absentFine: isPayingLeave ? 0 : prev.absentFine,
-        lateFine: !isPayingLeave ? 0 : prev.lateFine,
-        totalFine: isPayingLeave ? prev.lateFine : prev.absentFine
-      }));
-
+      await loadFinesDetails();
       triggerToast(`${isPayingLeave ? "Leave" : "Interval"} fine paid successfully! ✓`, true);
-
     } catch (err) {
       console.error(err);
       triggerToast("Payment failed. Please retry.", false);
@@ -650,9 +429,7 @@ Approved By:    ${rec.approvedBy}
                   <h4 className="font-display text-[0.95rem] font-bold flex items-center gap-2">
                     <FileText className="h-4.5 w-4.5 text-primary" /> Admin Fine Records & Statement
                   </h4>
-                  <span className="text-[0.72rem] text-muted-foreground">
-                    Auto-synced with Database
-                  </span>
+                  <span className="text-[0.72rem] text-muted-foreground">Auto-synced with Database</span>
                 </div>
 
                 {fineListItems.filter(i => i.fineType === 'Leave Fine').length === 0 ? (
@@ -791,9 +568,7 @@ Approved By:    ${rec.approvedBy}
                   <h4 className="font-display text-[0.95rem] font-bold flex items-center gap-2">
                     <FileText className="h-4.5 w-4.5 text-primary" /> Admin Fine Records & Statement
                   </h4>
-                  <span className="text-[0.72rem] text-muted-foreground">
-                    Auto-synced with Database
-                  </span>
+                  <span className="text-[0.72rem] text-muted-foreground">Auto-synced with Database</span>
                 </div>
 
                 {fineListItems.filter(i => i.fineType === 'Interval Fine').length === 0 ? (

@@ -21,6 +21,7 @@ import {
 // Import student subcomponents
 import StudentLeave from "./StudentLeave";
 import StudentFines from "./StudentFines";
+import { useUnpaidFines, UnpaidFineSummary } from "@/hooks/useUnpaidFines";
 
 const StudentDashboardShell = () => {
   const [sidebarOpen, setSidebarOpen] = useState(() => {
@@ -53,6 +54,8 @@ const StudentDashboardShell = () => {
     navigate("/login/student");
   };
 
+  const fineSummary = useUnpaidFines(student);
+
   if (!student) return null;
 
   const navItems = [
@@ -64,6 +67,14 @@ const StudentDashboardShell = () => {
 
   return (
     <div className="relative z-[1] flex min-h-screen bg-background text-foreground">
+      {/* Mobile sidebar overlay */}
+      {sidebarOpen && (
+        <div 
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 bg-black/60 z-30 lg:hidden"
+        />
+      )}
+
       {/* Sidebar */}
       <aside className={`fixed top-0 bottom-0 left-0 z-40 w-64 bg-card border-r border-border/60 transition-transform duration-300 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0 lg:static`}>
         <div className="flex flex-col h-full">
@@ -109,6 +120,14 @@ const StudentDashboardShell = () => {
                 >
                   {item.icon}
                   <span>{item.name}</span>
+                  {item.path === "/student/fines" && fineSummary.total > 0 && (
+                    <span className="ml-auto flex items-center gap-1.5">
+                      <span className="rounded-full bg-warn px-2 py-0.5 text-[0.65rem] font-bold text-white">
+                        ₹{fineSummary.total}
+                      </span>
+                      <span className="h-2 w-2 rounded-full bg-warn animate-pulse" />
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -134,9 +153,12 @@ const StudentDashboardShell = () => {
           <div className="flex items-center gap-3">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-1.5 rounded-lg border border-border bg-surface text-muted-foreground hover:text-foreground lg:hidden"
+              className="relative p-1.5 rounded-lg border border-border bg-surface text-muted-foreground hover:text-foreground lg:hidden"
             >
               <Menu className="h-5 w-5" />
+              {fineSummary.total > 0 && (
+                <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-warn animate-pulse" />
+              )}
             </button>
             <h2 className="font-display font-bold text-base md:text-lg">
               {navItems.find(item => item.path === location.pathname)?.name || "Overview"}
@@ -153,7 +175,7 @@ const StudentDashboardShell = () => {
         {/* Routes */}
         <main className="flex-1 overflow-y-auto">
           <Routes>
-            <Route path="dashboard" element={<StudentDashboardOverview student={student} />} />
+            <Route path="dashboard" element={<StudentDashboardOverview student={student} fineSummary={fineSummary} />} />
             <Route path="history" element={<StudentAttendanceHistory student={student} />} />
             <Route path="leave" element={<StudentLeave student={student} />} />
             <Route path="fines" element={<StudentFines student={student} />} />
@@ -166,7 +188,7 @@ const StudentDashboardShell = () => {
 };
 
 // Student overview stats subcomponent
-const StudentDashboardOverview = ({ student }: { student: any }) => {
+const StudentDashboardOverview = ({ student, fineSummary }: { student: any; fineSummary: UnpaidFineSummary }) => {
   const [stats, setStats] = useState({
     present: 0,
     absent: 0,
@@ -249,6 +271,32 @@ const StudentDashboardOverview = ({ student }: { student: any }) => {
         <h3 className="font-display text-lg font-bold text-foreground">Welcome back, {student.name}!</h3>
         <p className="text-[0.78rem] text-muted-foreground mt-1">Here is a quick look at your academic year attendance statistics.</p>
       </div>
+
+      {/* Pending fines alert */}
+      {fineSummary.total > 0 && (
+        <Link
+          to="/student/fines"
+          className="flex items-center justify-between gap-4 rounded-2xl border border-warn/30 bg-warn/10 p-4 transition-all hover:bg-warn/15"
+        >
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warn opacity-60" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-warn" />
+            </span>
+            <div>
+              <div className="font-display text-[0.92rem] font-bold text-foreground">
+                Pending Fines: ₹{fineSummary.total}
+              </div>
+              <div className="text-[0.72rem] text-muted-foreground">
+                Leave Fine ₹{fineSummary.leaveAmount} · Interval Fine ₹{fineSummary.intervalAmount}
+              </div>
+            </div>
+          </div>
+          <span className="rounded-lg border border-warn/30 bg-warn/20 px-3 py-1.5 text-[0.75rem] font-bold text-warn">
+            Pay Now ➔
+          </span>
+        </Link>
+      )}
 
       {/* Row Stats */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
