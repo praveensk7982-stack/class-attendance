@@ -411,7 +411,7 @@ const AdminFines = () => {
               <Sliders className="h-4.5 w-4.5 text-accent" /> Fines Summary
             </h3>
             <p className="text-[0.78rem] text-muted-foreground leading-relaxed">
-              Leave Fines (₹{leaveRate} per absent day) are generated automatically whenever a student is marked Absent. Interval Fines (₹{lateRate}) are NOT automatic and appear only when manually added by an administrator.
+              Absent Fines (₹{leaveRate}) and Interval Fines (₹{lateRate}) are NOT automatic. They appear only when an administrator adds them manually.
             </p>
           </div>
 
@@ -429,7 +429,7 @@ const AdminFines = () => {
                 ₹{leaveRate}
               </div>
               <div className="text-[0.62rem] uppercase tracking-wider text-muted-foreground mt-1">
-                Absent / Leave rate (Automatic)
+                Absent / Leave rate (Manual)
               </div>
             </div>
           </div>
